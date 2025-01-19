@@ -110,3 +110,4 @@ if __name__ == '__main__':
     
     output_dir = os.path.join(nnUNet_raw, f"Dataset{dataset_id}_{dataset_name}")
     format_data(data_dir, output_dir)
+    

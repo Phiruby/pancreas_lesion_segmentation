@@ -1,3 +1,4 @@
 data/
 Unet_data
-
+.env
+*.env
