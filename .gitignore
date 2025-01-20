@@ -1,4 +1,6 @@
-data/
-Unet_data
 .env
-*.env
+data/
+Unet_data*
+Unet_data.zip
+
+
