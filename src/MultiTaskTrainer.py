@@ -13,14 +13,35 @@ class ClassificationHead(nn.Module):
     """
     def __init__(self, input_channels, num_classes):
         super(ClassificationHead, self).__init__()
-        self.global_pool = nn.AdaptiveAvgPool3d(1)  # Global average pooling for 3D data
+        out_channels1 = input_channels * 2
+        kernel_size = (3, 4, 3)
+        stride = 2
+        padding = (
+            (kernel_size[0] - 1) // 2,
+            (kernel_size[1] - 1) // 2,
+            (kernel_size[2] - 1) // 2
+        )
+        self.conv1 = nn.Conv3d(
+            in_channels=input_channels,
+            out_channels=out_channels1,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding
+        )
         self.fc = nn.Linear(input_channels, num_classes)
 
+        self.final_softmax = nn.Softmax(dim=1)
+
     def forward(self, x):
+        # x input is of size torch.Size([3, 320, 4, 4, 6])
         # need to padd due to uneven sizing
         x = self.global_pool(x).view(x.size(0), -1)  # Flatten after pooling
         x = self.fc(x)
-        return x
+        # should produce something like
+        # tensor([[0.2253, 0.1116, 0.1045],
+        # [0.2341, 0.1148, 0.0975],
+        # [0.2219, 0.1030, 0.0840]]
+        return self.final_softmax(x)
 
 class nnUNetMultiTaskTrainer(nnUNetTrainer):
     """
@@ -130,6 +151,7 @@ configuration, fold, dataset_json, unpack_dataset, device)
         }
         # print(input.shape)
         # print("INPUT SHAPE")
+        # INPUT SHAPE is usually torch.Size([3, 1, 64, 128, 192]) (3 is batch size)
 
         # Forward pass
         output = self.network.encoder(input) # get encoder output
