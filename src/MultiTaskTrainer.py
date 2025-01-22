@@ -17,6 +17,7 @@ class ClassificationHead(nn.Module):
         self.fc = nn.Linear(input_channels, num_classes)
 
     def forward(self, x):
+        # need to padd due to uneven sizing
         x = self.global_pool(x).view(x.size(0), -1)  # Flatten after pooling
         x = self.fc(x)
         return x
@@ -60,21 +61,98 @@ configuration, fold, dataset_json, unpack_dataset, device)
         weights = weights / weights.sum()
         seg_loss = DeepSupervisionWrapper(seg_loss, weights)
 
-        return seg_loss 
+        def combined_loss(output, target):
+            '''
+            Args:
+                output:
+                    {
+                        "seg": predicted segs
+                        "classification": predicted classes. should be torch.tensor(
+                            [a,b,c],
+                            ...
+                            [a,b,c]
+                        )
+                    }
+                target:
+                    {
+                        "seg": actual segmentation
+                        "classification": actual class (integer)
+                    }
+            '''
+            seg_output = output["seg"]
+            cls_output = output["classification"]
+
+            target_seg = target['seg']
+            target_cls = target['classification']
+            # for each c
+            target_cls = torch.tensor(
+                [
+                    [1.0 if t == x else 0.0 for t in range(0,3)]
+                    for x in target['classification']
+                ]
+            ) 
+            # print(target_cls)
+
+            seg_loss_value = seg_loss(seg_output, target_seg)
+            cls_loss_value = self.f1_loss(cls_output, target_cls)
+            total_loss = seg_loss_value + 0.5 * cls_loss_value  # Weighted combination
+
+            return total_loss, seg_loss_value, cls_loss_value
+
+        return combined_loss
+
+    def f1_loss(self, y_pred, y_true):
+        """
+        Compute F1 loss for classification.
+        """
+        y_pred = torch.argmax(y_pred, dim=1)
+        tp = (y_pred * y_true).sum().to(torch.float32)
+        tn = ((1 - y_pred) * (1 - y_true)).sum().to(torch.float32)
+        fp = (y_pred * (1 - y_true)).sum().to(torch.float32)
+        fn = ((1 - y_pred) * y_true).sum().to(torch.float32)
+
+        precision = tp / (tp + fp + 1e-8)
+        recall = tp / (tp + fn + 1e-8)
+
+        f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+        return 1 - f1
 
     def train_step(self, data_dict):
         """
         Perform a training step with multi-task loss.
         """
-        data = data_dict['data']  # Input images
+        input = data_dict['data']  # Input images
+        expected_segs = data_dict['target']
+        expected_classifications = [int(x.split('_')[1]) for x in data_dict['keys']] # gets the classifictions
         target = {
-            'seg': data_dict['seg'],  # Segmentation labels
-            'classification': data_dict['classification']  # Classification labels
+            'seg': expected_segs,  # Segmentation labels
+            'classification': expected_classifications
         }
+        # print(input.shape)
+        # print("INPUT SHAPE")
 
         # Forward pass
-        output = self.network(data)
-        total_loss, seg_loss, cls_loss = self.loss(output, target)
+        output = self.network.encoder(input) # get encoder output
+        # unsure why output isn't already a tensor..?
+        # print(output)
+       
+        # print(output[-1].shape)
+        # print("ENCODER OUTPUT SHAPE")
+        segmentation_pred = self.network.decoder(output)
+
+        # print(segmentation_pred[-1].shape)
+        # print(segmentation_pred)
+        # print("DECODER OUTPUT")
+        # classification. choose the last from the output as that is the final output from the encoder
+        classification_pred = self.classification_head(output[-1])
+        # print("CLASSIFICATION OUTPUTS:")
+        # print(classification_pred)
+        total_output = {
+            "seg": segmentation_pred,
+            "classification": classification_pred
+        }
+
+        total_loss, seg_loss, cls_loss = self.loss(total_output, target)
 
         # Backpropagation and optimization
         self.optimizer.zero_grad()
@@ -91,14 +169,16 @@ configuration, fold, dataset_json, unpack_dataset, device)
         """
         Perform validation step for multi-task learning.
         """
-        data = data_dict['data']
+        input = data_dict['data']  # Input images
+        expected_segs = data_dict['target']
+        expected_classifications = [int(x.split('_')[1]) for x in data_dict['keys']] # gets the classifictions
         target = {
-            'seg': data_dict['seg'],
-            'classification': data_dict['classification']
+            'seg': expected_segs,  # Segmentation labels
+            'classification': expected_classifications
         }
 
         # Forward pass
-        output = self.network(data)
+        output = self.network(input)
         total_loss, seg_loss, cls_loss = self.loss(output, target)
 
         return {
