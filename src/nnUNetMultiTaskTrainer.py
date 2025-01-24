@@ -8,44 +8,19 @@ from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 import numpy as np
 
 class ClassificationHead(nn.Module):
+    """
+    A simple classification head for multi-task learning.
+    """
     def __init__(self, input_channels, num_classes):
         super(ClassificationHead, self).__init__()
-        
-        # Define the network
-        self.network = nn.Sequential(
-            # First conv block - reduce spatial dimensions
-            nn.Conv3d(
-                in_channels=input_channels,
-                out_channels=32,
-                kernel_size=3,
-                stride=2,
-                padding=1
-            ),
-            nn.ReLU(),
-            nn.BatchNorm3d(32),
-            
-            # Second conv block - further reduction
-            nn.Conv3d(
-                in_channels=32,
-                out_channels=64,
-                kernel_size=3,
-                stride=2,
-                padding=1
-            ),
-            nn.ReLU(),
-            nn.BatchNorm3d(64),
-            
-            # Global pooling to get fixed size output
-            nn.AdaptiveAvgPool3d((1, 1, 1)),
-            
-            # Flatten for final classification
-            nn.Flatten(),
-            nn.Linear(64, num_classes),
-            nn.Softmax(dim=1)
-        )
-        
+        self.global_pool = nn.AdaptiveAvgPool3d(1)  # Global average pooling for 3D data
+        self.fc = nn.Linear(input_channels, num_classes)
+        self.sm = nn.Softmax(dim=1)
     def forward(self, x):
-        return self.network(x)
+        # need to padd due to uneven sizing
+        x = self.global_pool(x).view(x.size(0), -1)  # Flatten after pooling
+        x = self.fc(x)
+        return self.sm(x)
 
 class nnUNetMultiTaskTrainer(nnUNetTrainer):
     """
@@ -111,9 +86,8 @@ configuration, fold, dataset_json, unpack_dataset, device)
             target_cls = target['classification']
             # for each c
             predicted_cls = torch.argmax(cls_output, dim = 1)
-
             seg_loss_value = seg_loss(seg_output, target_seg)
-            cls_loss_value = self.f1_loss(predicted_cls, target_cls)
+            cls_loss_value = self.f1_loss(cls_output, torch.tensor(target_cls))
             total_loss = seg_loss_value + 0.5 * cls_loss_value  # Weighted combination
 
             return total_loss, seg_loss_value, cls_loss_value
@@ -147,26 +121,25 @@ configuration, fold, dataset_json, unpack_dataset, device)
             'seg': expected_segs,  # Segmentation labels
             'classification': expected_classifications
         }
-        # print(input.shape)
-        # print("INPUT SHAPE")
-        # INPUT SHAPE is usually torch.Size([3, 1, 64, 128, 192]) (3 is batch size)
+        print(input.shape)
+        print("INPUT SHAPE")
 
         # Forward pass
         output = self.network.encoder(input) # get encoder output
         # unsure why output isn't already a tensor..?
         # print(output)
        
-        # print(output[-1].shape)
-        # print("ENCODER OUTPUT SHAPE")
+        print(output[-1].shape)
+        print("ENCODER OUTPUT SHAPE")
         segmentation_pred = self.network.decoder(output)
 
-        # print(segmentation_pred[-1].shape)
+        print(segmentation_pred[-1].shape)
         # print(segmentation_pred)
-        # print("DECODER OUTPUT")
+        print("DECODER OUTPUT")
         # classification. choose the last from the output as that is the final output from the encoder
         classification_pred = self.classification_head(output[-1])
-        # print("CLASSIFICATION OUTPUTS:")
-        # print(classification_pred)
+        print("CLASSIFICATION OUTPUTS:")
+        print(classification_pred)
         total_output = {
             "seg": segmentation_pred,
             "classification": classification_pred

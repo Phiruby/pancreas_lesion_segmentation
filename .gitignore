@@ -1,6 +1,7 @@
-.env
 data/
 Unet_data*
 Unet_data.zip
-
-
+.venv
+inference_output
+inference
+.env

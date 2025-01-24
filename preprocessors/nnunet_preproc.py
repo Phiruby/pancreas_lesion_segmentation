@@ -23,7 +23,7 @@ def ct_windowing(image, window_level, window_width):
     
     # Normalize the image to the range 0-255 for visualization
     windowed_image = ((windowed_image - lower_bound) / (upper_bound - lower_bound)) * 255
-    windowed_image = np.uint8(windowed_image)  # Convert to uint8 for visualization
+    windowed_image = np.int64(windowed_image)  # Convert to uint8 for visualization
     
     return windowed_image
 
@@ -33,7 +33,7 @@ class CustomPreprocessor(DefaultPreprocessor):
 
     def preprocess(self, data, **kwargs):
         # Apply HU windowing before other preprocessing steps
-        # Bassing numbers off of https://kevalnagda.github.io/ct-windowing
+        # Basing numbers off of https://kevalnagda.github.io/ct-windowing
         wl = 60
         ww = 300
         data = ct_windowing(data, wl, ww)
